@@ -79,7 +79,7 @@ public:
     inline const QStringList &help() const override;
 
 private:
-    const QString time(time_t time, const QString &format);
+    const QString time(const QDateTime& t, const QString &format);
 
 private:
     QStringList m_help;

@@ -27,6 +27,10 @@
 #include <KIO/StatJob>
 #include <kio_version.h>
 
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 SystemPlugin::SystemPlugin(PluginLoader *loader)
     : FilePlugin(loader)
 {
@@ -39,6 +43,7 @@ SystemPlugin::SystemPlugin(PluginLoader *loader)
     this->addSupportedToken("hour");
     this->addSupportedToken("minute");
     this->addSupportedToken("second");
+    this->addSupportedToken("msec");
     this->addSupportedToken("user");
     this->addSupportedToken("group");
     this->addSupportedToken("creationdate");
@@ -58,6 +63,7 @@ SystemPlugin::SystemPlugin(PluginLoader *loader)
     m_help.append(Plugin::createHelpEntry("hour", i18n("Insert the current hour as number")));
     m_help.append(Plugin::createHelpEntry("minute", i18n("Insert the current minute as number")));
     m_help.append(Plugin::createHelpEntry("second", i18n("Insert the current second as number")));
+    m_help.append(Plugin::createHelpEntry("msec", i18n("Insert the current msec as number")));
     m_help.append(Plugin::createHelpEntry("user", i18n("Owner of the file")));
     m_help.append(Plugin::createHelpEntry("group", i18n("Owning group of the file")));
     m_help.append(Plugin::createHelpEntry("creationdate", i18n("Insert the files creation date")));
@@ -118,8 +124,17 @@ QString SystemPlugin::processFile(BatchRenamer *b, int index, const QString &fil
         return tmp.sprintf("%0*i", 2, t.minute());
     } else if (token == "second") {
         return tmp.sprintf("%0*i", 2, t.second());
+    } else if (token == "msec") {
+        return tmp.sprintf("%0*i", 3, t.msec());
     } else {
         const QUrl &url = b->files()->at(index).srcUrl();
+	const QString file_name = url.toLocalFile();
+	struct stat info;
+	stat(file_name.toLatin1().data(), &info);
+	uint64_t access_ms       = info.st_atime * 1000 + info.st_atim.tv_nsec / 1000000;
+	uint64_t status_ms       = info.st_ctime * 1000 + info.st_ctim.tv_nsec / 1000000;
+	uint64_t modification_ms = info.st_mtime * 1000 + info.st_mtim.tv_nsec / 1000000;
+
 #if KIO_VERSION >= QT_VERSION_CHECK(5, 69, 0)
         KIO::StatJob *statJob = KIO::statDetails(url, KIO::StatJob::DestinationSide, KIO::StatDefaultDetails);
 #else
@@ -130,18 +145,17 @@ QString SystemPlugin::processFile(BatchRenamer *b, int index, const QString &fil
             return QString();
         }
         KFileItem item(statJob->statResult(), url);
-        if (token == "user") {
+
+	if (token == "user") {
             return item.user();
         } else if (token == "group") {
             return item.group();
-        } else if (token == "creationdate")
-            // TODO: Use toDateTime()
-        {
-            return time(item.time(KFileItem::ModificationTime).toSecsSinceEpoch(), format);
+        } else if (token == "creationdate") {
+            return time(QDateTime::fromMSecsSinceEpoch(modification_ms), format);
         } else if (token == "modificationdate") {
-            return time(item.time(KFileItem::ModificationTime).toSecsSinceEpoch(), format);
+            return time(QDateTime::fromMSecsSinceEpoch(modification_ms), format);
         } else if (token == "accessdate") {
-            return time(item.time(KFileItem::AccessTime).toSecsSinceEpoch(), format);
+            return time(QDateTime::fromMSecsSinceEpoch(access_ms), format);
         } else if (token == "filesize") {
             return QString::number(item.size());
         }
@@ -150,9 +164,7 @@ QString SystemPlugin::processFile(BatchRenamer *b, int index, const QString &fil
     return QString();
 }
 
-const QString SystemPlugin::time(time_t time, const QString &format)
+const QString SystemPlugin::time(const QDateTime& t, const QString &format)
 {
-    QDateTime dt;
-    dt.setSecsSinceEpoch(time);
-    return dt.toString(format);
+    return t.toString(format);
 }
